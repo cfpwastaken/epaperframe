@@ -1,0 +1,11 @@
+node_modules
+old
+pic
+pics
+test
+*.jpg
+*.raw
+*.bmp
+converterto7color
+.env
+picoCode/config.py
