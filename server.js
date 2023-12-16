@@ -3,6 +3,8 @@ import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { convertCtoRaw } from "./convert.js";
+import { createServer as createHttpServer } from "node:http";
+import { createReadStream } from "node:fs";
 
 // const file = process.argv[2] || "test.raw";
 let lastFile = "";
@@ -10,12 +12,51 @@ const forcedFile = process.argv[2] || null;
 const immichKey = process.env.IMMICH_KEY;
 const immichServer = process.env.IMMICH_SERVER;
 const allowedAlbums = process.env.IMMICH_ALBUMS.split(",");
+const workTimes = process.env.WORK_TIMES;
+const delay = parseInt(process.env.DELAY); // 10 minutes
+let nextAt = new Date();
 
 const server = createServer();
+const httpServer = createHttpServer(async (req, res) => {
+  if(req.url === "/") {
+    res.writeHead(200, {
+      "Content-Type": "text/html"
+    });
+    // Send the index.html file
+    res.end(await readFile("webinterface/index.html"));
+  } else if(req.url === "/script.js") {
+    res.writeHead(200, {
+      "Content-Type": "text/javascript"
+    });
+    res.end(await readFile("webinterface/script.js"));
+  } else if(req.url === "/current.jpg") {
+    // Send the current image, force the browser to not cache it
+    res.writeHead(200, {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "no-cache"
+    });
+    const stream = createReadStream("pic.jpg");
+    stream.pipe(res);
+  } else if(req.url === "/next") {
+    // Send the time until the next update
+    res.writeHead(200, {
+      "Content-Type": "text/plain"
+    });
+    res.end(nextAt.toString());
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+});
 server.on("connection", async function(sock) {
 	console.log("CONNECTED: " + sock.remoteAddress + ":" + sock.remotePort);
 	let displaywidth = 600;
 	let displayheight = 448;
+
+  const timeUntilUpdate = calculateTimeForNextUpdate();
+  sock.write(timeUntilUpdate.toString());
+  sock.write("STARTDATA");
+
   let file;
   if(!forcedFile) {
     const files = (await readdir("pics")).filter(f => f.endsWith(".raw"));
@@ -57,6 +98,34 @@ server.on("connection", async function(sock) {
 server.listen(6957, "0.0.0.0", () => {
 	console.log("TCP Server running");
 });
+httpServer.listen(6958, () => {
+  console.log("HTTP Server running");
+});
+
+function calculateTimeForNextUpdate() {
+  // Calculate the amount of time until the display should be updated
+  // Every delay seconds, but only within the work times, if it is outside of the work times, wait until the next day at the start of the work times
+  const now = new Date();
+  const workStart = new Date();
+  const workEnd = new Date();
+  workStart.setHours(parseInt(workTimes.split("-")[0].split(":")[0]));
+  workStart.setMinutes(parseInt(workTimes.split("-")[0].split(":")[1]));
+  workEnd.setHours(parseInt(workTimes.split("-")[1].split(":")[0]));
+  workEnd.setMinutes(parseInt(workTimes.split("-")[1].split(":")[1]));
+  let nextUpdate = new Date();
+  if (now < workStart) {
+    nextUpdate = workStart;
+  } else if (now > workEnd) {
+    nextUpdate = workStart;
+    nextUpdate.setDate(nextUpdate.getDate() + 1);
+  } else {
+    nextUpdate = new Date(now.getTime() + delay);
+  }
+  const timeUntilUpdate = nextUpdate - now - (60 * 1000);
+  nextAt = nextUpdate;
+  console.log("Time until next update:", timeUntilUpdate, "ms");
+  return timeUntilUpdate;
+}
 
 async function getAllAlbums() {
   return (await fetch(immichServer + "album", {
@@ -86,8 +155,9 @@ async function getAlbum(id) {
         return {
           id: asset.id,
           type: asset.type,
+					orientation: asset.exifInfo.orientation,
         };
-      }).filter(asset => asset.type === "IMAGE")
+      }).filter(asset => asset.type === "IMAGE" && asset.orientation === "1")
     }
   })[0]
 }
@@ -105,10 +175,16 @@ async function downloadAsset(id, toFile) {
 async function chooseNewImage() {
   const allAlbums = await getAllAlbums();
   const albums = allAlbums.filter(a => a.assetCount > 0 && allowedAlbums.includes(a.name));
-  const albumInfo = albums[Math.floor(Math.random() * albums.length)];
-  console.log("Chose album", albumInfo.name);
-  const album = await getAlbum(albumInfo.id);
-  const asset = album.assets[Math.floor(Math.random() * album.assets.length)];
+  let gotPic = false;
+  let asset;
+  while(!gotPic) {
+    const albumInfo = albums[Math.floor(Math.random() * albums.length)];
+    console.log("Chose album", albumInfo.name);
+    const album = await getAlbum(albumInfo.id);
+    if(album.assets.length == 0) continue;
+    asset = album.assets[Math.floor(Math.random() * album.assets.length)];
+    gotPic = true;
+  }
   await downloadAsset(asset.id, "pic.jpg");
   console.log("Downloaded new image");
 }
