@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { convertCtoRaw } from "./convert.js";
 import { createServer as createHttpServer } from "node:http";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 
 // const file = process.argv[2] || "test.raw";
 let lastFile = "";
@@ -14,7 +14,7 @@ const immichServer = process.env.IMMICH_SERVER;
 const allowedAlbums = process.env.IMMICH_ALBUMS.split(",");
 const workTimes = process.env.WORK_TIMES;
 const delay = parseInt(process.env.DELAY); // 10 minutes
-let nextAt = new Date();
+let info = {next: new Date(), album: ""};
 
 const server = createServer();
 const httpServer = createHttpServer(async (req, res) => {
@@ -31,18 +31,23 @@ const httpServer = createHttpServer(async (req, res) => {
     res.end(await readFile("webinterface/script.js"));
   } else if(req.url === "/current.jpg") {
     // Send the current image, force the browser to not cache it
+    if(!existsSync("pic.jpg")) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
     res.writeHead(200, {
       "Content-Type": "image/jpeg",
       "Cache-Control": "no-cache"
     });
     const stream = createReadStream("pic.jpg");
     stream.pipe(res);
-  } else if(req.url === "/next") {
+  } else if(req.url === "/info") {
     // Send the time until the next update
     res.writeHead(200, {
-      "Content-Type": "text/plain"
+      "Content-Type": "application/json"
     });
-    res.end(nextAt.toString());
+    res.end(JSON.stringify(info));
   } else {
     res.writeHead(404);
     res.end();
@@ -122,7 +127,7 @@ function calculateTimeForNextUpdate() {
     nextUpdate = new Date(now.getTime() + delay);
   }
   const timeUntilUpdate = nextUpdate - now - (60 * 1000);
-  nextAt = nextUpdate;
+  info.next = nextUpdate;
   console.log("Time until next update:", timeUntilUpdate, "ms");
   return timeUntilUpdate;
 }
@@ -155,9 +160,10 @@ async function getAlbum(id) {
         return {
           id: asset.id,
           type: asset.type,
-					orientation: asset.exifInfo.orientation,
+          width: asset.exifInfo.exifImageWidth,
+          height: asset.exifInfo.exifImageHeight
         };
-      }).filter(asset => asset.type === "IMAGE" && asset.orientation === "1")
+      }).filter(asset => asset.type === "IMAGE" && ["16:9", "4:3"].includes(calculateAspectRatio(asset.width, asset.height)))
     }
   })[0]
 }
@@ -172,6 +178,12 @@ async function downloadAsset(id, toFile) {
   await writeFile(toFile, buf);
 }
 
+function calculateAspectRatio(width, height) {
+  const gcd = (a, b) => (b == 0) ? a : gcd(b, a % b);
+  const r = gcd(width, height);
+  return width / r + ":" + height / r;
+}
+
 async function chooseNewImage() {
   const allAlbums = await getAllAlbums();
   const albums = allAlbums.filter(a => a.assetCount > 0 && allowedAlbums.includes(a.name));
@@ -184,6 +196,7 @@ async function chooseNewImage() {
     if(album.assets.length == 0) continue;
     asset = album.assets[Math.floor(Math.random() * album.assets.length)];
     gotPic = true;
+    info.album = albumInfo.name;
   }
   await downloadAsset(asset.id, "pic.jpg");
   console.log("Downloaded new image");

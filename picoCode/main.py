@@ -77,6 +77,8 @@ epd.send_data(0xC0)
 epd.send_command(0x10)
 chunk_size = 512
 total_bytes = 134400
+delayTime = -1
+started = False
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 try:
 	s.connect((host, port))
@@ -86,15 +88,27 @@ try:
 	while True:
 		data = s.recv(chunk_size)
 		led.on()
-		received_bytes += len(data)
-		print(f"Received {len(data)} bytes. Total received: {received_bytes}/{total_bytes}")
 		if len(data) == 0:
 			break
 		# Process data
 		if data:
-			epd.send_data1(bytearray(data))
-			led.off()
+			if started:
+				received_bytes += len(data)
+				print(f"Received {len(data)} bytes. Total received: {received_bytes}/{total_bytes}")
+				epd.send_data1(bytearray(data))
+				led.off()
+			else:
+				print(data)
+				if data == b'STARTDATA':
+					started = True
+					print("Server indicating start of EPaper data")
+				else:
+					delayTime = int(data)
+					print("Received delay time of " + str(delayTime))
 	print("Download finished")
+except:
+	utime.sleep(5)
+	machine.reset()
 finally:
 	s.close()
 	print("Connection closed")
@@ -108,11 +122,11 @@ epd.BusyLow()
 epd.delay_ms(200)
 print("Finished magic")
 epd.Sleep()
-print("Going to sleep for 1min")
+print("Going to sleep")
 nic.disconnect()
 nic.active(False)
 nic.deinit()
 utime.sleep_ms(100)
 nic=None
-machine.lightsleep(60000)
+machine.lightsleep(delayTime)
 machine.reset()

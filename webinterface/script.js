@@ -1,4 +1,6 @@
-const countDownDate = new Date(await fetch("next").then(res => res.text())).getTime();
+const info = await fetch("info").then(res => res.json());
+document.querySelector("#album").innerText = "from " + info.album;
+const countDownDate = new Date(info.next).getTime();
 const start = new Date().getTime();
 const x = setInterval(function() {
   var now = new Date().getTime();
