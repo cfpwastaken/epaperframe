@@ -108,6 +108,14 @@ httpServer.listen(6958, () => {
 });
 
 function calculateTimeForNextUpdate() {
+  if(workTimes == "always") {
+    const now = new Date();
+    let nextUpdate = new Date(now.getTime() + delay);
+    const timeUntilUpdate = nextUpdate - now - (60 * 1000);
+    info.next = nextUpdate;
+    console.log("Time until next update:", timeUntilUpdate, "ms (forced from always)");
+    return timeUntilUpdate;
+  }
   // Calculate the amount of time until the display should be updated
   // Every delay seconds, but only within the work times, if it is outside of the work times, wait until the next day at the start of the work times
   const now = new Date();
