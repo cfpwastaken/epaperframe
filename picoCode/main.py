@@ -40,7 +40,10 @@ nic = network.WLAN(network.STA_IF)
 nic.active(True)
 utime.sleep(8) # wait for the networking to come available
 nic.connect(config.ssid, config.password)
+att = 0
 while not nic.isconnected(): 
+	if att > 5:
+		break
 	print("Connecting")
 	led.on()
 	utime.sleep(0.5)
@@ -56,13 +59,14 @@ while not nic.isconnected():
 		nic.active(True)
 		utime.sleep(8)
 		nic.connect(config.ssid, config.password)
+		att = att + 1
 if not nic.isconnected():
 	aps = nic.scan()
 	apstr = ""
 	for ap in aps:
 		print(ap)
 		apstr = apstr + str(ap[0]) + " S" + str(ap[4]) + " R" + str(ap[3]) + "\n"
-	printerror("Network connection failed: " + str(s) + ". Dumping network list:\n" + apstr + "\nIDLE = 0 - CONNECTING = 1 - WRONG_PASSWORD = -3 - NO_AP_FOUND = -2\nCONNECT_FAIL = -1 - GOT_IP = 3 - NOIP = 2")
+	printerror("Netzwerkverbindung fehlgeschlagen: " + str(s) + ". Dumping network list:\n" + apstr + "\nIDLE = 0 - CONNECTING = 1 - WRONG_PASSWORD = -3 - NO_AP_FOUND = -2\nCONNECT_FAIL = -1 - GOT_IP = 3 - NOIP = 2")
 
 print("TEST")
 epd.fill(0xff)
@@ -107,6 +111,7 @@ try:
 					print("Received delay time of " + str(delayTime))
 	print("Download finished")
 except:
+	printerror("Verbindung mit Server fehlgeschlagen!")
 	utime.sleep(5)
 	machine.reset()
 finally:

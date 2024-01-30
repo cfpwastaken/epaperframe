@@ -1,5 +1,5 @@
 import { exec, execSync } from "node:child_process";
-import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { copyFile, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { convertCtoRaw } from "./convert.js";
@@ -193,21 +193,26 @@ function calculateAspectRatio(width, height) {
 }
 
 async function chooseNewImage() {
-  const allAlbums = await getAllAlbums();
-  const albums = allAlbums.filter(a => a.assetCount > 0 && allowedAlbums.includes(a.name));
-  let gotPic = false;
-  let asset;
-  while(!gotPic) {
-    const albumInfo = albums[Math.floor(Math.random() * albums.length)];
-    console.log("Chose album", albumInfo.name);
-    const album = await getAlbum(albumInfo.id);
-    if(album.assets.length == 0) continue;
-    asset = album.assets[Math.floor(Math.random() * album.assets.length)];
-    gotPic = true;
-    info.album = albumInfo.name;
-  }
-  await downloadAsset(asset.id, "pic.jpg");
-  console.log("Downloaded new image");
+	try {
+		const allAlbums = await getAllAlbums();
+		const albums = allAlbums.filter(a => a.assetCount > 0 && allowedAlbums.includes(a.name));
+		let gotPic = false;
+		let asset;
+		while(!gotPic) {
+			const albumInfo = albums[Math.floor(Math.random() * albums.length)];
+			console.log("Chose album", albumInfo.name);
+			const album = await getAlbum(albumInfo.id);
+			if(album.assets.length == 0) continue;
+			asset = album.assets[Math.floor(Math.random() * album.assets.length)];
+			gotPic = true;
+			info.album = albumInfo.name;
+		}
+		await downloadAsset(asset.id, "pic.jpg");
+		console.log("Downloaded new image");
+	} catch(e) {
+		console.error(e);
+		await copyFile("immicherror.jpg", "pic.jpg");
+	}
 }
 
 async function makeNewImage() {
