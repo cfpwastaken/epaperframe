@@ -15,6 +15,7 @@ const allowedAlbums = process.env.IMMICH_ALBUMS.split(",");
 const workTimes = process.env.WORK_TIMES;
 const delay = parseInt(process.env.DELAY); // 10 minutes
 let info = {next: new Date(), album: ""};
+let memoryLaneInfo = [];
 
 const server = createServer();
 const httpServer = createHttpServer(async (req, res) => {
@@ -141,7 +142,7 @@ function calculateTimeForNextUpdate() {
 }
 
 async function getAllAlbums() {
-  return (await fetch(immichServer + "album", {
+  return (await fetch(immichServer + "albums", {
     headers: {
       "x-api-key": immichKey
     },
@@ -155,7 +156,7 @@ async function getAllAlbums() {
 }
 
 async function getAlbum(id) {
-  return [(await fetch(immichServer + "album/" + id, {
+  return [(await fetch(immichServer + "albums/" + id, {
     headers: {
       "x-api-key": immichKey
     }
@@ -171,13 +172,13 @@ async function getAlbum(id) {
           width: asset.exifInfo.exifImageWidth,
           height: asset.exifInfo.exifImageHeight
         };
-      }).filter(asset => asset.type === "IMAGE" && ["16:9", "4:3"].includes(calculateAspectRatio(asset.width, asset.height)))
+      }).filter(asset => asset.type === "IMAGE" /*&& ["16:9", "4:3"].includes(calculateAspectRatio(asset.width, asset.height))*/)
     }
   })[0]
 }
 
 async function downloadAsset(id, toFile) {
-  const arrBuf = await fetch(immichServer + "asset/file/" + id + "?isThumb=false&isWeb=true", {
+  const arrBuf = await fetch(immichServer + "assets/" + id + "/original", {
     headers: {
       "x-api-key": immichKey
     },
@@ -186,14 +187,73 @@ async function downloadAsset(id, toFile) {
   await writeFile(toFile, buf);
 }
 
-function calculateAspectRatio(width, height) {
-  const gcd = (a, b) => (b == 0) ? a : gcd(b, a % b);
-  const r = gcd(width, height);
-  return width / r + ":" + height / r;
+async function getMemoryLane() {
+	const day = new Date().getDate();
+	const month = new Date().getMonth() + 1;
+
+	const res = await fetch(immichServer + "assets/memory-lane?day=" + day + "&month=" + month, {
+		headers: {
+			"x-api-key": immichKey
+		}
+	}).then(res => res.json());
+	return res;
 }
+
+async function getAlbumOfAsset(id) {
+	const res = await fetch(immichServer + "albums?assetId=" + id, {
+		headers: {
+			"x-api-key": immichKey
+		}
+	}).then(res => res.json());
+	return res;
+}
+
+// function calculateAspectRatio(width, height) {
+//   const gcd = (a, b) => (b == 0) ? a : gcd(b, a % b);
+//   const r = gcd(width, height);
+//   return width / r + ":" + height / r;
+// }
+
+async function getEligiblePicturesFromMemoryLane() {
+	const memoryLane = await getMemoryLane();
+	console.log(memoryLane);
+	if(memoryLane.length == 0) return [];
+	let pics = [];
+	for(const lane of memoryLane) {
+		const laneTitle = lane.title;
+		for(const pic of lane.assets) {
+			if(pic.type != "IMAGE") continue;
+			// if(!["16:9", "4:3"].includes(calculateAspectRatio(pic.width, pic.height))) continue;
+			const albumsIn = await getAlbumOfAsset(pic.id);
+			if(albumsIn.length == 0) continue;
+			if(albumsIn.filter(a => allowedAlbums.includes(a.albumName)).length == 0) continue;
+			if(memoryLaneInfo.filter(m => m.id == pic.id && m.expire < new Date()).length > 0) continue;
+			// Remove memorylane info if it exists
+			memoryLaneInfo = memoryLaneInfo.filter(m => m.id != pic.id);
+			// Add new memorylane info
+			memoryLaneInfo.push({ id: pic.id, expire: new Date(new Date().getTime() + 1000 * 60 * 60 * 3) }); // 3 hours
+			console.log(pic);
+			console.log("Albums in", albumsIn);
+			pics.push({ id: pic.id, title: laneTitle });
+		}
+	}
+	return pics;
+}
+
+getEligiblePicturesFromMemoryLane()
 
 async function chooseNewImage() {
 	try {
+		if(Math.random() < 0.3) {
+			const memoryLanePics = await getEligiblePicturesFromMemoryLane();
+			if(memoryLanePics.length > 0) {
+				const pic = memoryLanePics[Math.floor(Math.random() * memoryLanePics.length)];
+				await downloadAsset(pic.id, "memory.jpg");
+				console.log("Downloaded new image from memory lane");
+				info.album = "Memory Lane: " + pic.title;
+				return;
+			}
+		}
 		const allAlbums = await getAllAlbums();
 		const albums = allAlbums.filter(a => a.assetCount > 0 && allowedAlbums.includes(a.name));
 		let gotPic = false;
@@ -211,7 +271,7 @@ async function chooseNewImage() {
 		console.log("Downloaded new image");
 	} catch(e) {
 		console.error(e);
-		await copyFile("immicherror.jpg", "pic.jpg");
+		await copyFile("/app/immicherror.jpg", "pic.jpg");
 	}
 }
 
